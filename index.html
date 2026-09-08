@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>SHADOWFURYMEDYA</title>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background:
+                radial-gradient(circle at top, #171b31, #080a10 50%, #040508);
+            color: white;
+            min-height: 100vh;
+        }
+
+        header {
+            height: 72px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+
+            padding: 0 7%;
+
+            position: sticky;
+            top: 0;
+            z-index: 100;
+
+            background: rgba(5, 7, 12, 0.8);
+            backdrop-filter: blur(15px);
+
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+
+        .logo {
+            font-size: 20px;
+            font-weight: bold;
+            letter-spacing: 1px;
+        }
+
+        .logo span {
+            color: #8a6cff;
+        }
+
+        nav {
+            display: flex;
+            gap: 25px;
+        }
+
+        nav a {
+            color: #aaaec0;
+            text-decoration: none;
+            font-size: 14px;
+            transition: 0.2s;
+        }
+
+        nav a:hover {
+            color: white;
+        }
+
+        .hero {
+            min-height: calc(100vh - 72px);
+
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+
+            padding: 70px 8%;
+
+            gap: 60px;
+        }
+
+        .hero-text {
+            max-width: 700px;
+        }
+
+        .badge {
+            display: inline-block;
+
+            padding: 8px 13px;
+            margin-bottom: 22px;
+
+            border-radius: 30px;
+
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.1);
+
+            color: #aeb3c7;
+            font-size: 13px;
+        }
+
+        h1 {
+            font-size: clamp(50px, 8vw, 90px);
+            line-height: 0.95;
+            letter-spacing: -3px;
+
+            background:
+                linear-gradient(
+                    90deg,
+                    white,
+                    #aeb9ff,
+                    #bd8cff
+                );
+
+            -webkit-background-clip: text;
+            color: transparent;
+        }
+
+        .hero-text p {
+            margin-top: 25px;
+
+            color: #9ba1b4;
+
+            font-size: 18px;
+            line-height: 1.7;
+        }
+
+        .buttons {
+            display: flex;
+            gap: 12px;
+
+            margin-top: 30px;
+        }
+
+        .button {
+            padding: 14px 20px;
+
+            border-radius: 13px;
+
+            text-decoration: none;
+            color: white;
+
+            font-weight: bold;
+
+            transition: 0.2s;
+        }
+
+        .primary {
+            background:
+                linear-gradient(
+                    135deg,
+                    #7b59ef,
+                    #4d74ef
+                );
+
+            box-shadow:
+                0 10px 30px rgba(91, 79, 230, 0.25);
+        }
+
+        .secondary {
+            background: rgba(255,255,255,0.07);
+
+            border:
+                1px solid rgba(255,255,255,0.1);
+        }
+
+        .button:hover {
+            transform: translateY(-2px);
+        }
+
+        .nova-card {
+            width: 380px;
+
+            padding: 45px 30px;
+
+            border-radius: 28px;
+
+            text-align: center;
+
+            background: rgba(255,255,255,0.05);
+
+            border:
+                1px solid rgba(255,255,255,0.1);
+
+            box-shadow:
+                0 30px 80px rgba(0,0,0,0.4);
+        }
+
+        .nova-logo {
+            width: 95px;
+            height: 95px;
+
+            margin: auto;
+            margin-bottom: 25px;
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            border-radius: 30px;
+
+            font-size: 40px;
+            font-weight: bold;
+
+            background:
+                linear-gradient(
+                    135deg,
+                    #8b5cff,
+                    #4e75ef
+                );
+
+            box-shadow:
+                0 0 50px rgba(113, 83, 255, 0.4);
+        }
+
+        .nova-card h2 {
+            font-size: 30px;
+        }
+
+        .nova-card p {
+            color: #989daf;
+
+            margin-top: 10px;
+
+            line-height: 1.6;
+        }
+
+        section.content {
+            padding: 100px 8%;
+        }
+
+        .section-title {
+            font-size: 45px;
+            margin-bottom: 15px;
+        }
+
+        .section-description {
+            color: #979caf;
+
+            max-width: 650px;
+
+            line-height: 1.7;
+
+            margin-bottom: 40px;
+        }
+
+        .projects {
+            display: grid;
+
+            grid-template-columns:
+                repeat(3, 1fr);
+
+            gap: 20px;
+        }
+
+        .project {
+            padding: 30px;
+
+            border-radius: 20px;
+
+            background: rgba(255,255,255,0.045);
+
+            border:
+                1px solid rgba(255,255,255,0.08);
+
+            transition: 0.2s;
+        }
+
+        .project:hover {
+            transform: translateY(-5px);
+
+            border-color:
+                rgba(255,255,255,0.18);
+        }
+
+        .project-icon {
+            font-size: 30px;
+            margin-bottom: 20px;
+        }
+
+        .project h3 {
+            margin-bottom: 12px;
+        }
+
+        .project p {
+            color: #969bad;
+
+            line-height: 1.6;
+
+            font-size: 14px;
+        }
+
+        .nova-section {
+            margin: 70px 8%;
+
+            padding: 55px;
+
+            border-radius: 30px;
+
+            background:
+                radial-gradient(
+                    circle at right,
+                    rgba(112, 81, 255, 0.25),
+                    transparent 45%
+                ),
+                rgba(255,255,255,0.04);
+
+            border:
+                1px solid rgba(255,255,255,0.1);
+        }
+
+        .nova-section h2 {
+            font-size: 50px;
+            margin-bottom: 15px;
+        }
+
+        .nova-section p {
+            max-width: 700px;
+
+            color: #9da2b5;
+
+            line-height: 1.7;
+
+            margin-bottom: 30px;
+        }
+
+        footer {
+            padding: 30px 8%;
+
+            border-top:
+                1px solid rgba(255,255,255,0.08);
+
+            color: #70768a;
+
+            display: flex;
+            justify-content: space-between;
+
+            font-size: 13px;
+        }
+
+        @media (max-width: 850px) {
+
+            nav {
+                display: none;
+            }
+
+            .hero {
+                flex-direction: column;
+
+                text-align: center;
+
+                justify-content: center;
+            }
+
+            .buttons {
+                justify-content: center;
+            }
+
+            .nova-card {
+                width: 100%;
+                max-width: 420px;
+            }
+
+            .projects {
+                grid-template-columns: 1fr;
+            }
+
+            .nova-section {
+                margin: 40px 5%;
+                padding: 30px;
+            }
+
+            footer {
+                flex-direction: column;
+                gap: 10px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+<header>
+
+    <div class="logo">
+        SHADOWFURY<span>MEDYA</span>
+    </div>
+
+    <nav>
+        <a href="#home">Ana Sayfa</a>
+        <a href="#projects">Projeler</a>
+        <a href="#nova">NOVA AI</a>
+        <a href="#about">Hakkımızda</a>
+    </nav>
+
+</header>
+
+
+<section class="hero" id="home">
+
+    <div class="hero-text">
+
+        <div class="badge">
+            ⚡ Teknoloji • Medya • Yapay Zekâ
+        </div>
+
+        <h1>
+            SHADOWFURY<br>
+            MEDYA
+        </h1>
+
+        <p>
+            Teknoloji, dijital medya ve yapay zekâ projelerini
+            tek çatı altında buluşturan yeni nesil dijital platform.
+        </p>
+
+        <div class="buttons">
+
+            <a
+                href="#nova"
+                class="button primary"
+            >
+                NOVA AI'ı Keşfet
+            </a>
+
+            <a
+                href="#projects"
+                class="button secondary"
+            >
+                Projelerimiz
+            </a>
+
+        </div>
+
+    </div>
+
+
+    <div class="nova-card">
+
+        <div class="nova-logo">
+            N
+        </div>
+
+        <h2>
+            NOVA AI
+        </h2>
+
+        <p>
+            SHADOWFURYMEDYA tarafından geliştirilen
+            teknolojik yapay zekâ asistanı.
+        </p>
+
+    </div>
+
+</section>
+
+
+<section
+    class="content"
+    id="projects"
+>
+
+    <h2 class="section-title">
+        Projelerimiz
+    </h2>
+
+    <p class="section-description">
+        SHADOWFURYMEDYA altında yeni nesil
+        teknoloji ve dijital projeler geliştiriyoruz.
+    </p>
+
+
+    <div class="projects">
+
+        <div class="project">
+
+            <div class="project-icon">
+                🤖
+            </div>
+
+            <h3>
+                NOVA AI
+            </h3>
+
+            <p>
+                Sohbet edebilen ve kullanıcılara
+                çeşitli konularda yardımcı olabilen
+                yapay zekâ asistanı.
+            </p>
+
+        </div>
+
+
+        <div class="project">
+
+            <div class="project-icon">
+                ⚡
+            </div>
+
+            <h3>
+                Teknoloji
+            </h3>
+
+            <p>
+                Modern teknolojiler kullanılarak
+                geliştirilen yeni nesil dijital projeler.
+            </p>
+
+        </div>
+
+
+        <div class="project">
+
+            <div class="project-icon">
+                🌐
+            </div>
+
+            <h3>
+                Dijital Medya
+            </h3>
+
+            <p>
+                SHADOWFURYMEDYA markası altında
+                oluşturulan dijital içerikler ve platformlar.
+            </p>
+
+        </div>
+
+    </div>
+
+</section>
+
+
+<section
+    class="nova-section"
+    id="nova"
+>
+
+    <h2>
+        NOVA AI
+    </h2>
+
+    <p>
+        NOVA AI, SHADOWFURYMEDYA'nın
+        yapay zekâ projesidir.
+
+        NOVA ile sohbet edebilir,
+        sorular sorabilir ve yapay zekâ
+        destekli özelliklerden yararlanabilirsin.
+    </p>
+
+    <a
+        href="#"
+        class="button primary"
+        onclick="openNova(event)"
+    >
+        NOVA AI'ı Aç →
+    </a>
+
+</section>
+
+
+<section
+    class="content"
+    id="about"
+>
+
+    <h2 class="section-title">
+        Hakkımızda
+    </h2>
+
+    <p class="section-description">
+        SHADOWFURYMEDYA; teknoloji,
+        dijital medya ve yapay zekâ
+        alanlarında projeler geliştiren
+        bağımsız bir dijital markadır.
+    </p>
+
+</section>
+
+
+<footer>
+
+    <div>
+        © 2026 SHADOWFURYMEDYA
+    </div>
+
+    <div>
+        NOVA AI — by SHADOWFURYMEDYA
+    </div>
+
+</footer>
+
+
+<script>
+
+function openNova(event) {
+
+    event.preventDefault();
+
+    alert(
+        "NOVA AI yakında burada!"
+    );
+
+}
+
+</script>
+
+</body>
+</html>
