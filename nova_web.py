@@ -1,8 +1,7 @@
 import os
-import json
 import re
-import uuid
 import time
+import uuid
 from datetime import datetime
 
 from flask import Flask, request, jsonify, render_template_string, session
@@ -17,101 +16,79 @@ from google.genai import types
 
 app = Flask(__name__)
 
-app.secret_key = os.getenv("NOVA_SECRET_KEY") or "CHANGE-ME-IN-RENDER"
+app.secret_key = os.getenv(
+    "NOVA_SECRET_KEY",
+    "nova-change-this-secret-key"
+)
 
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=os.getenv("RENDER") == "true",
+    SESSION_COOKIE_SECURE=bool(os.getenv("RENDER")),
+    MAX_CONTENT_LENGTH=10 * 1024 * 1024
 )
+
+
+# =========================================================
+# GEMINI
+# =========================================================
 
 API_KEY = os.getenv("GEMINI_API_KEY")
 
 if not API_KEY:
-    raise RuntimeError("GEMINI_API_KEY bulunamadı.")
+    raise RuntimeError(
+        "GEMINI_API_KEY bulunamadı."
+    )
 
-client = genai.Client(api_key=API_KEY)
+client = genai.Client(
+    api_key=API_KEY
+)
 
 PRIMARY_MODEL = "gemini-3.7-flash"
 FALLBACK_MODEL = "gemini-2.5-flash"
 
-MEMORY_FILE = "nova_memory.json"
-HISTORY_FILE = "nova_history.json"
-
 
 # =========================================================
-# JSON YARDIMCILARI
+# KULLANICIYA ÖZEL VERİLER
 # =========================================================
 
-def load_json(filename, default):
-    try:
-        if os.path.exists(filename):
-            with open(filename, "r", encoding="utf-8") as file:
-                return json.load(file)
-    except Exception as error:
-        print(f"{filename} okunamadı:", error)
-
-    return default
-
-
-def save_json(filename, data):
-    try:
-        with open(filename, "w", encoding="utf-8") as file:
-            json.dump(
-                data,
-                file,
-                ensure_ascii=False,
-                indent=2
-            )
-    except Exception as error:
-        print(f"{filename} kaydedilemedi:", error)
-
-
-# =========================================================
-# KULLANICIYA ÖZEL SOHBET VE HAFIZA
-# =========================================================
-
-loaded_histories = load_json(HISTORY_FILE, {})
-loaded_memories = load_json(MEMORY_FILE, {})
-
-if not isinstance(loaded_histories, dict):
-    loaded_histories = {}
-
-if not isinstance(loaded_memories, dict):
-    loaded_memories = {}
-
-user_histories = loaded_histories
-user_memories = loaded_memories
+user_histories = {}
+user_memories = {}
 
 
 def get_user_id():
-    user_id = session.get("nova_user_id")
+
+    user_id = session.get(
+        "nova_user_id"
+    )
 
     if not user_id:
+
         user_id = uuid.uuid4().hex
-        session["nova_user_id"] = user_id
+
+        session[
+            "nova_user_id"
+        ] = user_id
 
     return user_id
 
 
 def get_user_history(user_id):
-    history = user_histories.get(user_id)
 
-    if not isinstance(history, list):
-        history = []
-        user_histories[user_id] = history
+    if user_id not in user_histories:
 
-    return history
+        user_histories[user_id] = []
+
+    return user_histories[user_id]
 
 
 def get_user_memory(user_id):
-    memory = user_memories.get(user_id)
 
-    if not isinstance(memory, dict):
-        memory = {}
-        user_memories[user_id] = memory
+    if user_id not in user_memories:
 
-    return memory
+        user_memories[user_id] = {}
+
+    return user_memories[user_id]
 
 
 # =========================================================
@@ -119,26 +96,44 @@ def get_user_memory(user_id):
 # =========================================================
 
 SYSTEM_PROMPT = """
-Senin adın NOVA AI.
+Sen NOVA AI'sın.
 
-Sen SHADOWFURYMEDYA tarafından geliştirilen teknolojik yapay zekâ asistanısın.
-Kurucun Mustafa'dır.
+Sen SHADOWFURYMEDYA'nın teknolojik yapay zekâ asistanısın.
+
+Seni Mustafa geliştirdi.
 
 Marka kimliğin:
+
 NOVA AI — by SHADOWFURYMEDYA
 
 Kullanıcı Türkçe konuşuyorsa Türkçe cevap ver.
-Doğal, kısa, net ve yardımcı konuş.
-Kullanıcı ayrıntı isterse ayrıntılı anlat.
 
-Sana kim olduğun sorulursa NOVA AI olduğunu söyle.
+Doğal, anlaşılır ve yardımcı cevaplar ver.
 
-Seni kimin yaptığı veya kurduğu sorulursa:
-"Beni Mustafa kurdu. Ben SHADOWFURYMEDYA'nın teknolojik yapay zekâsıyım."
+Normal bilgi soruları, matematik, kodlama, yazı yazma,
+fikir üretme, günlük sohbet ve diğer genel sorulara
+mümkün olduğunca yardımcı ol.
+
+Kullanıcı fotoğraf yüklerse fotoğrafı dikkatlice incele
+ve kullanıcının sorusuna göre cevap ver.
+
+Fotoğrafta emin olmadığın bir şeyi kesinmiş gibi söyleme.
+
+Sana "Sen kimsin?" diye sorulursa:
+
+"Ben NOVA AI. SHADOWFURYMEDYA'nın teknolojik yapay zekâ asistanıyım."
+
 şeklinde cevap ver.
 
-Google Gemini altyapısını kullanıp kullanmadığın açıkça sorulursa dürüstçe
-Google Gemini altyapısını kullandığını söyle.
+Seni kimin geliştirdiği sorulursa:
+
+"Beni Mustafa geliştirdi. Ben SHADOWFURYMEDYA'nın teknolojik yapay zekâsıyım."
+
+şeklinde cevap ver.
+
+Google Gemini altyapısını kullanıp kullanmadığın
+açıkça sorulursa dürüstçe Gemini altyapısının
+kullanıldığını söyle.
 """
 
 
@@ -146,8 +141,10 @@ Google Gemini altyapısını kullandığını söyle.
 # BASİT KİŞİSEL HAFIZA
 # =========================================================
 
-def update_memory(message, user_id, user_memory):
-    text = message.strip()
+def update_memory(
+    message,
+    user_memory
+):
 
     patterns = [
         r"benim adım\s+([A-Za-zÇĞİÖŞÜçğıöşü]+)",
@@ -155,162 +152,318 @@ def update_memory(message, user_id, user_memory):
     ]
 
     for pattern in patterns:
-        match = re.search(pattern, text, flags=re.IGNORECASE)
+
+        match = re.search(
+            pattern,
+            message,
+            flags=re.IGNORECASE
+        )
 
         if match:
-            name = match.group(1).strip().capitalize()
 
-            user_memory["kullanıcı_adı"] = name
-            user_memories[user_id] = user_memory
+            name = (
+                match
+                .group(1)
+                .strip()
+                .capitalize()
+            )
 
-            save_json(MEMORY_FILE, user_memories)
+            user_memory[
+                "kullanıcı_adı"
+            ] = name
+
             break
 
 
 # =========================================================
-# GEMINI
+# SİSTEM METNİ
 # =========================================================
 
-def build_contents(user_history, message):
+def make_system_text(
+    user_memory
+):
+
+    text = SYSTEM_PROMPT
+
+    if user_memory:
+
+        text += (
+            "\nBu kullanıcıya özel "
+            "hafıza bilgileri:\n"
+        )
+
+        for key, value in user_memory.items():
+
+            text += (
+                f"- {key}: {value}\n"
+            )
+
+    return text
+
+
+# =========================================================
+# SOHBET GEÇMİŞİNİ GEMINI FORMATINA ÇEVİR
+# =========================================================
+
+def build_history(
+    user_history
+):
+
     contents = []
 
     for item in user_history[-20:]:
-        role = item.get("role", "")
-        text = str(item.get("text", "")).strip()
+
+        role = item.get(
+            "role",
+            ""
+        )
+
+        text = str(
+            item.get(
+                "text",
+                ""
+            )
+        ).strip()
 
         if not text:
             continue
 
         if role == "user":
+
             gemini_role = "user"
+
         elif role == "assistant":
+
             gemini_role = "model"
+
         else:
+
             continue
 
         contents.append(
             types.Content(
                 role=gemini_role,
-                parts=[types.Part(text=text)]
+                parts=[
+                    types.Part(
+                        text=text
+                    )
+                ]
             )
         )
-
-    contents.append(
-        types.Content(
-            role="user",
-            parts=[types.Part(text=message)]
-        )
-    )
 
     return contents
 
 
-def ask_gemini(message, user_history, user_memory):
-    lower = message.lower().strip()
+# =========================================================
+# GEMINI ÇAĞRISI
+# =========================================================
 
-    identity_words = [
-        "seni kim kurdu",
-        "seni kim yaptı",
-        "seni kim yarattı",
-        "kim yaptı seni",
-        "kim kurdu seni"
+def call_gemini(
+    contents,
+    system_text
+):
+
+    models = [
+        PRIMARY_MODEL,
+        FALLBACK_MODEL
     ]
 
-    if any(word in lower for word in identity_words):
-        return (
-            "Beni Mustafa kurdu. "
-            "Ben SHADOWFURYMEDYA'nın teknolojik yapay zekâsıyım."
-        )
-
-    if lower in {"sen kimsin", "kimsin", "adın ne", "senin adın ne"}:
-        return (
-            "Ben NOVA AI. "
-            "SHADOWFURYMEDYA'nın teknolojik yapay zekâ asistanıyım."
-        )
-
-    contents = build_contents(user_history, message)
-
-    system_text = SYSTEM_PROMPT
-
-    if user_memory:
-        system_text += "\nKullanıcı hakkında yalnızca bu oturuma ait bilgiler:\n"
-
-        for key, value in user_memory.items():
-            system_text += f"- {key}: {value}\n"
-
-    models_to_try = [PRIMARY_MODEL, FALLBACK_MODEL]
     last_error = ""
 
-    for model_name in models_to_try:
+    for model_name in models:
+
         for attempt in range(2):
+
             try:
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=contents,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system_text,
-                        temperature=0.7
+
+                response = (
+                    client.models.generate_content(
+                        model=model_name,
+                        contents=contents,
+                        config=(
+                            types.GenerateContentConfig(
+                                system_instruction=system_text,
+                                temperature=0.7
+                            )
+                        )
                     )
                 )
 
-                reply = getattr(response, "text", None)
+                reply = getattr(
+                    response,
+                    "text",
+                    None
+                )
 
                 if reply:
-                    return reply.strip()
 
-                last_error = "Model boş yanıt verdi."
+                    return (
+                        reply.strip(),
+                        None
+                    )
 
             except Exception as error:
-                last_error = str(error)
+
+                last_error = str(
+                    error
+                )
 
                 print()
-                print("========== GEMINI HATASI ==========")
-                print("MODEL:", model_name)
-                print("DENEME:", attempt + 1)
-                print(last_error)
-                print("===================================")
+                print(
+                    "========== GEMINI HATASI =========="
+                )
+                print(
+                    "MODEL:",
+                    model_name
+                )
+                print(
+                    last_error
+                )
+                print(
+                    "==================================="
+                )
                 print()
 
                 temporary_error = (
                     "503" in last_error
                     or "UNAVAILABLE" in last_error
-                    or "high demand" in last_error.lower()
+                    or "high demand"
+                    in last_error.lower()
                 )
 
                 quota_error = (
                     "429" in last_error
-                    or "RESOURCE_EXHAUSTED" in last_error
+                    or "RESOURCE_EXHAUSTED"
+                    in last_error
                 )
 
-                if temporary_error and attempt == 0:
+                if (
+                    temporary_error
+                    and attempt == 0
+                ):
+
                     time.sleep(1)
+
                     continue
 
-                if temporary_error or quota_error:
+                if (
+                    temporary_error
+                    or quota_error
+                ):
+
                     break
 
                 return (
-                    "NOVA şu anda yapay zekâ servisine bağlanamadı. "
-                    "Biraz sonra tekrar dene."
+                    None,
+                    "NOVA şu anda yapay zekâ servisine bağlanamadı."
                 )
 
-    if "429" in last_error or "RESOURCE_EXHAUSTED" in last_error:
+    if (
+        "429" in last_error
+        or "RESOURCE_EXHAUSTED"
+        in last_error
+    ):
+
         return (
-            "NOVA şu anda kullanım sınırına ulaştı. "
-            "Biraz sonra tekrar dene."
+            None,
+            "NOVA şu anda kullanım sınırına ulaştı. Biraz sonra tekrar dene."
         )
 
     if (
         "503" in last_error
-        or "UNAVAILABLE" in last_error
-        or "high demand" in last_error.lower()
+        or "UNAVAILABLE"
+        in last_error
+        or "high demand"
+        in last_error.lower()
     ):
+
         return (
-            "NOVA şu anda yoğunluk nedeniyle cevap veremiyor. "
-            "Biraz sonra tekrar dene."
+            None,
+            "NOVA şu anda yoğun. Biraz sonra tekrar dene."
         )
 
-    return "NOVA şu anda cevap oluşturamadı."
+    return (
+        None,
+        "NOVA şu anda cevap oluşturamadı."
+    )
+
+
+# =========================================================
+# NORMAL MESAJ
+# =========================================================
+
+def ask_text(
+    message,
+    user_history,
+    user_memory
+):
+
+    contents = build_history(
+        user_history
+    )
+
+    contents.append(
+        types.Content(
+            role="user",
+            parts=[
+                types.Part(
+                    text=message
+                )
+            ]
+        )
+    )
+
+    return call_gemini(
+        contents,
+        make_system_text(
+            user_memory
+        )
+    )
+
+
+# =========================================================
+# FOTOĞRAF MESAJI
+# =========================================================
+
+def ask_image(
+    message,
+    image_bytes,
+    mime_type,
+    user_memory
+):
+
+    if not message:
+
+        message = (
+            "Bu fotoğrafı incele ve "
+            "bana ne gördüğünü anlat."
+        )
+
+    image_part = (
+        types.Part.from_bytes(
+            data=image_bytes,
+            mime_type=mime_type
+        )
+    )
+
+    contents = [
+        types.Content(
+            role="user",
+            parts=[
+                image_part,
+                types.Part(
+                    text=message
+                )
+            ]
+        )
+    ]
+
+    return call_gemini(
+        contents,
+        make_system_text(
+            user_memory
+        )
+    )
 
 
 # =========================================================
@@ -319,13 +472,21 @@ def ask_gemini(message, user_history, user_memory):
 
 HTML = r"""
 <!DOCTYPE html>
+
 <html lang="tr">
+
 <head>
 
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<title>NOVA AI — SHADOWFURYMEDYA</title>
+<meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+>
+
+<title>
+NOVA AI — SHADOWFURYMEDYA
+</title>
 
 <style>
 
@@ -341,6 +502,7 @@ body {
 }
 
 body {
+
     background:
         radial-gradient(
             circle at top,
@@ -349,57 +511,82 @@ body {
             #05060a 100%
         );
 
-    color: #ffffff;
+    color: white;
 
     font-family:
-        Inter,
         Arial,
         sans-serif;
 
     overflow: hidden;
 }
 
+
 .app {
+
     height: 100vh;
 
     display: flex;
+
     flex-direction: column;
 }
 
+
+/* HEADER */
+
 .header {
-    height: 70px;
-    flex-shrink: 0;
+
+    min-height: 68px;
 
     display: flex;
+
     align-items: center;
+
     justify-content: space-between;
 
-    padding: 0 24px;
+    padding:
+        0
+        18px;
 
-    background: rgba(10, 12, 20, 0.82);
+    background:
+        rgba(
+            10,
+            12,
+            20,
+            .88
+        );
 
     border-bottom:
-        1px solid rgba(255,255,255,0.08);
-
-    backdrop-filter: blur(18px);
+        1px solid
+        rgba(
+            255,
+            255,
+            255,
+            .08
+        );
 }
+
+
+.brand {
+
+    display: flex;
+
+    align-items: center;
+
+    gap: 11px;
+}
+
 
 .logo {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
 
-.logo-icon {
     width: 40px;
+
     height: 40px;
 
-    border-radius: 12px;
-
     display: grid;
+
     place-items: center;
 
-    font-weight: 800;
+    border-radius: 12px;
 
     background:
         linear-gradient(
@@ -408,16 +595,18 @@ body {
             #4f7cff
         );
 
-    box-shadow:
-        0 0 25px rgba(112, 83, 255, .35);
+    font-weight: bold;
 }
 
-.logo-title {
-    font-size: 18px;
-    font-weight: 800;
+
+.brand-name {
+
+    font-weight: bold;
 }
 
-.logo-subtitle {
+
+.brand-sub {
+
     margin-top: 2px;
 
     color: #8d93a8;
@@ -425,49 +614,69 @@ body {
     font-size: 11px;
 }
 
+
 .new-chat {
+
+    padding:
+        9px
+        12px;
+
     border: 0;
 
     border-radius: 10px;
 
-    padding: 10px 14px;
-
-    background: rgba(255,255,255,.08);
+    background:
+        rgba(
+            255,
+            255,
+            255,
+            .08
+        );
 
     color: white;
 
     cursor: pointer;
 }
 
-.new-chat:hover {
-    background: rgba(255,255,255,.14);
-}
+
+/* CHAT */
 
 .chat {
+
     flex: 1;
 
     overflow-y: auto;
 
     padding:
-        30px
-        max(20px, calc((100vw - 900px) / 2))
-        120px;
+        25px
+        max(
+            14px,
+            calc(
+                (100vw - 900px)
+                / 2
+            )
+        )
+        145px;
 
     scroll-behavior: smooth;
 }
 
+
 .welcome {
+
     margin-top: 12vh;
 
     text-align: center;
 }
 
+
 .welcome h1 {
-    margin: 0 0 12px;
+
+    margin-bottom: 10px;
 
     font-size:
         clamp(
-            34px,
+            36px,
             6vw,
             58px
         );
@@ -475,57 +684,78 @@ body {
     background:
         linear-gradient(
             90deg,
-            #fff,
+            #ffffff,
             #9caeff,
             #ba8cff
         );
 
-    -webkit-background-clip: text;
+    -webkit-background-clip:
+        text;
 
-    color: transparent;
+    color:
+        transparent;
 }
+
 
 .welcome p {
-    color: #969bad;
+
+    color:
+        #969bad;
 }
 
-.message-row {
-    width: 100%;
+
+/* MESAJ */
+
+.row {
 
     display: flex;
 
-    margin-bottom: 18px;
+    margin-bottom: 17px;
 }
 
-.message-row.user {
-    justify-content: flex-end;
+
+.row.user {
+
+    justify-content:
+        flex-end;
 }
 
-.message-row.assistant {
-    justify-content: flex-start;
+
+.row.assistant {
+
+    justify-content:
+        flex-start;
 }
 
-.message {
+
+.bubble {
+
     max-width:
         min(
             760px,
-            88%
+            90%
         );
 
-    padding: 14px 16px;
+    padding:
+        13px
+        15px;
 
-    border-radius: 18px;
+    border-radius:
+        17px;
 
-    font-size: 15px;
+    line-height:
+        1.55;
 
-    line-height: 1.55;
+    white-space:
+        pre-wrap;
 
-    white-space: pre-wrap;
-
-    word-break: break-word;
+    word-break:
+        break-word;
 }
 
-.user .message {
+
+.user .bubble {
+
     background:
         linear-gradient(
             135deg,
@@ -534,109 +764,264 @@ body {
         );
 }
 
-.assistant .message {
-    background: rgba(255,255,255,.07);
+
+.assistant .bubble {
+
+    background:
+        rgba(
+            255,
+            255,
+            255,
+            .07
+        );
 
     border:
-        1px solid rgba(255,255,255,.08);
+        1px solid
+        rgba(
+            255,
+            255,
+            255,
+            .08
+        );
 }
 
+
+/* FOTO ÖNİZLEME */
+
+.photo-preview {
+
+    display: block;
+
+    max-width: 260px;
+
+    max-height: 260px;
+
+    margin-bottom: 10px;
+
+    border-radius: 14px;
+}
+
+
+/* KOPYALA */
+
 .copy-btn {
-    margin-top: 9px;
+
+    display: block;
+
+    margin-top: 8px;
 
     border: 0;
 
-    background: transparent;
+    background:
+        transparent;
 
-    color: #969bad;
+    color:
+        #969bad;
 
-    cursor: pointer;
+    cursor:
+        pointer;
 }
 
-.copy-btn:hover {
-    color: white;
-}
 
-.bottom-area {
+/* ALT ALAN */
+
+.bottom {
+
     position: fixed;
 
     left: 0;
+
     right: 0;
+
     bottom: 0;
 
     padding:
         12px
-        max(15px, calc((100vw - 900px) / 2))
-        18px;
+        max(
+            12px,
+            calc(
+                (100vw - 900px)
+                / 2
+            )
+        )
+        16px;
 
     background:
         linear-gradient(
             transparent,
-            rgba(5,6,10,.98) 30%
+            rgba(
+                5,
+                6,
+                10,
+                .99
+            )
+            28%
         );
 }
 
+
+/* SEÇİLEN FOTO */
+
+.selected-image {
+
+    display: none;
+
+    align-items: center;
+
+    justify-content:
+        space-between;
+
+    gap: 10px;
+
+    margin-bottom: 8px;
+
+    padding:
+        9px
+        12px;
+
+    border-radius:
+        12px;
+
+    background:
+        rgba(
+            255,
+            255,
+            255,
+            .08
+        );
+
+    color:
+        #c7cada;
+
+    font-size:
+        12px;
+}
+
+
+.selected-image.show {
+
+    display: flex;
+}
+
+
+.remove-image {
+
+    border: 0;
+
+    background:
+        transparent;
+
+    color:
+        #ff8f9b;
+
+    cursor:
+        pointer;
+}
+
+
+/* INPUT */
+
 .input-box {
+
     display: flex;
 
-    align-items: flex-end;
+    align-items:
+        flex-end;
 
     gap: 8px;
 
-    padding: 9px;
+    padding: 8px;
 
-    border-radius: 20px;
+    border-radius:
+        18px;
 
-    background: rgba(22,25,38,.96);
+    background:
+        rgba(
+            22,
+            25,
+            38,
+            .97
+        );
 
     border:
-        1px solid rgba(255,255,255,.1);
+        1px solid
+        rgba(
+            255,
+            255,
+            255,
+            .10
+        );
 }
 
+
 textarea {
+
     flex: 1;
 
-    min-height: 42px;
-    max-height: 150px;
+    min-width: 0;
+
+    min-height: 44px;
+
+    max-height: 140px;
 
     resize: none;
 
     border: 0;
+
     outline: 0;
 
-    padding: 10px;
+    padding: 11px;
 
-    background: transparent;
+    background:
+        transparent;
 
     color: white;
 
     font: inherit;
 }
 
+
 textarea::placeholder {
-    color: #71778c;
+
+    color:
+        #71778c;
 }
 
-.icon-btn {
+
+.icon-button {
+
     width: 44px;
+
     height: 44px;
 
     flex-shrink: 0;
 
     border: 0;
 
-    border-radius: 13px;
+    border-radius:
+        13px;
 
-    background: rgba(255,255,255,.08);
+    background:
+        rgba(
+            255,
+            255,
+            255,
+            .09
+        );
 
-    color: white;
+    color:
+        white;
 
-    cursor: pointer;
+    cursor:
+        pointer;
 
-    font-size: 17px;
+    font-size:
+        18px;
 }
 
-.send-btn {
+
+.send-button {
+
     background:
         linear-gradient(
             135deg,
@@ -645,60 +1030,52 @@ textarea::placeholder {
         );
 }
 
-.icon-btn:disabled {
-    opacity: .45;
 
-    cursor: default;
+.icon-button:disabled {
+
+    opacity:
+        .45;
+
+    cursor:
+        default;
 }
 
-.status {
-    margin-top: 8px;
 
-    text-align: center;
-
-    color: #666d80;
-
-    font-size: 11px;
-}
-
-.typing {
-    opacity: .7;
-
-    font-style: italic;
-}
-
-@media (max-width: 600px) {
+@media (
+    max-width: 600px
+) {
 
     .header {
-        height: 62px;
 
-        padding: 0 14px;
+        min-height:
+            60px;
+
+        padding:
+            0
+            12px;
     }
 
-    .logo-icon {
-        width: 34px;
-        height: 34px;
-    }
-
-    .logo-title {
-        font-size: 16px;
-    }
 
     .chat {
+
         padding:
-            20px
-            12px
-            120px;
+            18px
+            10px
+            135px;
     }
 
-    .message {
-        max-width: 92%;
+
+    .bubble {
+
+        max-width:
+            94%;
     }
 
-    .new-chat {
-        padding: 8px 10px;
 
-        font-size: 12px;
+    .brand-sub {
+
+        display:
+            none;
     }
 }
 
@@ -706,30 +1083,39 @@ textarea::placeholder {
 
 </head>
 
+
 <body>
+
 
 <div class="app">
 
 
 <header class="header">
 
-    <div class="logo">
 
-        <div class="logo-icon">
+    <div class="brand">
+
+
+        <div class="logo">
             N
         </div>
 
+
         <div>
 
-            <div class="logo-title">
+
+            <div class="brand-name">
                 NOVA AI
             </div>
 
-            <div class="logo-subtitle">
+
+            <div class="brand-sub">
                 by SHADOWFURYMEDYA
             </div>
 
+
         </div>
+
 
     </div>
 
@@ -741,6 +1127,7 @@ textarea::placeholder {
         + Yeni sohbet
     </button>
 
+
 </header>
 
 
@@ -749,35 +1136,71 @@ textarea::placeholder {
     class="chat"
 >
 
+
     <div
         id="welcome"
         class="welcome"
     >
 
+
         <h1>
             NOVA AI
         </h1>
 
+
         <p>
-            Bugün sana nasıl yardımcı olabilirim?
+            Mesaj yaz veya fotoğraf yükle.
         </p>
 
+
     </div>
+
 
 </main>
 
 
-<div class="bottom-area">
+<div class="bottom">
+
+
+    <div
+        id="selectedImage"
+        class="selected-image"
+    >
+
+
+        <span
+            id="selectedName"
+        ></span>
+
+
+        <button
+            class="remove-image"
+            onclick="removeImage()"
+        >
+            Kaldır ✕
+        </button>
+
+
+    </div>
+
 
     <div class="input-box">
 
-        <button
-            id="voiceButton"
-            class="icon-btn"
-            onclick="startVoice()"
-            title="Sesli mesaj"
+
+        <input
+            id="imageInput"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            hidden
         >
-            🎤
+
+
+        <button
+            id="imageButton"
+            class="icon-button"
+            title="Fotoğraf ekle"
+        >
+            🖼️
         </button>
 
 
@@ -790,19 +1213,15 @@ textarea::placeholder {
 
         <button
             id="sendButton"
-            class="icon-btn send-btn"
-            onclick="sendMessage()"
+            class="icon-button send-button"
             title="Gönder"
         >
             ➤
         </button>
 
+
     </div>
 
-
-    <div class="status">
-        NOVA AI — by SHADOWFURYMEDYA
-    </div>
 
 </div>
 
@@ -812,69 +1231,164 @@ textarea::placeholder {
 
 <script>
 
+
 const chat =
-    document.getElementById("chat");
+    document.getElementById(
+        "chat"
+    );
+
 
 const input =
-    document.getElementById("messageInput");
+    document.getElementById(
+        "messageInput"
+    );
+
+
+const imageInput =
+    document.getElementById(
+        "imageInput"
+    );
+
+
+const imageButton =
+    document.getElementById(
+        "imageButton"
+    );
+
 
 const sendButton =
-    document.getElementById("sendButton");
+    document.getElementById(
+        "sendButton"
+    );
 
-const voiceButton =
-    document.getElementById("voiceButton");
 
-let busy = false;
+const selectedImage =
+    document.getElementById(
+        "selectedImage"
+    );
+
+
+const selectedName =
+    document.getElementById(
+        "selectedName"
+    );
+
+
+let selectedFile =
+    null;
+
+
+let busy =
+    false;
+
+
+/* =====================================================
+   MESAJ
+===================================================== */
 
 
 function hideWelcome() {
 
     const welcome =
-        document.getElementById("welcome");
+        document.getElementById(
+            "welcome"
+        );
+
 
     if (welcome) {
-        welcome.style.display = "none";
+
+        welcome.style.display =
+            "none";
     }
 }
 
 
-function addMessage(role, text) {
+function addMessage(
+    role,
+    text,
+    imageUrl = null
+) {
 
     hideWelcome();
 
+
     const row =
-        document.createElement("div");
+        document.createElement(
+            "div"
+        );
+
 
     row.className =
-        "message-row " + role;
+        "row " + role;
 
 
     const bubble =
-        document.createElement("div");
+        document.createElement(
+            "div"
+        );
+
 
     bubble.className =
-        "message";
+        "bubble";
 
 
-    const textElement =
-        document.createElement("div");
-
-    textElement.textContent =
-        text;
+    if (imageUrl) {
 
 
-    bubble.appendChild(
-        textElement
-    );
+        const image =
+            document.createElement(
+                "img"
+            );
 
 
-    if (role === "assistant") {
+        image.className =
+            "photo-preview";
+
+
+        image.src =
+            imageUrl;
+
+
+        bubble.appendChild(
+            image
+        );
+    }
+
+
+    if (text) {
+
+
+        const textElement =
+            document.createElement(
+                "div"
+            );
+
+
+        textElement.textContent =
+            text;
+
+
+        bubble.appendChild(
+            textElement
+        );
+    }
+
+
+    if (
+        role === "assistant"
+        && text
+    ) {
+
 
         const copy =
-            document.createElement("button");
+            document.createElement(
+                "button"
+            );
+
 
         copy.className =
             "copy-btn";
+
 
         copy.textContent =
             "📋 Kopyala";
@@ -883,11 +1397,14 @@ function addMessage(role, text) {
         copy.onclick =
             async function () {
 
+
                 try {
+
 
                     await navigator.clipboard.writeText(
                         text
                     );
+
 
                     copy.textContent =
                         "✓ Kopyalandı";
@@ -896,19 +1413,22 @@ function addMessage(role, text) {
                     setTimeout(
                         function () {
 
+
                             copy.textContent =
                                 "📋 Kopyala";
+
 
                         },
                         1200
                     );
 
+
                 } catch (error) {
+
 
                     copy.textContent =
                         "Kopyalanamadı";
                 }
-
             };
 
 
@@ -922,53 +1442,196 @@ function addMessage(role, text) {
         bubble
     );
 
+
     chat.appendChild(
         row
     );
 
+
     chat.scrollTop =
         chat.scrollHeight;
-
-
-    return row;
 }
+
+
+/* =====================================================
+   YAZIYOR
+===================================================== */
 
 
 function showTyping() {
 
+
     const row =
-        addMessage(
-            "assistant",
-            "NOVA yazıyor..."
+        document.createElement(
+            "div"
         );
 
+
     row.id =
-        "typing-row";
+        "typingRow";
 
 
-    row
-        .querySelector(".message")
-        .classList
-        .add("typing");
+    row.className =
+        "row assistant";
+
+
+    row.innerHTML =
+        '<div class="bubble">NOVA yazıyor...</div>';
+
+
+    chat.appendChild(
+        row
+    );
+
+
+    chat.scrollTop =
+        chat.scrollHeight;
 }
 
 
 function hideTyping() {
 
+
     const row =
         document.getElementById(
-            "typing-row"
+            "typingRow"
         );
 
+
     if (row) {
+
         row.remove();
     }
 }
 
 
+/* =====================================================
+   FOTOĞRAF SEÇ
+===================================================== */
+
+
+imageButton.onclick =
+    function () {
+
+
+        imageInput.click();
+    };
+
+
+imageInput.onchange =
+    function () {
+
+
+        const file =
+            imageInput.files[0];
+
+
+        if (!file) {
+
+
+            removeImage();
+
+
+            return;
+        }
+
+
+        const allowed =
+            [
+                "image/jpeg",
+                "image/png",
+                "image/webp"
+            ];
+
+
+        if (
+            !allowed.includes(
+                file.type
+            )
+        ) {
+
+
+            alert(
+                "Sadece JPG, PNG veya WEBP yükleyebilirsin."
+            );
+
+
+            imageInput.value =
+                "";
+
+
+            return;
+        }
+
+
+        if (
+            file.size >
+            8 * 1024 * 1024
+        ) {
+
+
+            alert(
+                "Fotoğraf en fazla 8 MB olabilir."
+            );
+
+
+            imageInput.value =
+                "";
+
+
+            return;
+        }
+
+
+        selectedFile =
+            file;
+
+
+        selectedName.textContent =
+            "🖼️ " + file.name;
+
+
+        selectedImage
+            .classList
+            .add(
+                "show"
+            );
+    };
+
+
+function removeImage() {
+
+
+    selectedFile =
+        null;
+
+
+    imageInput.value =
+        "";
+
+
+    selectedName.textContent =
+        "";
+
+
+    selectedImage
+        .classList
+        .remove(
+            "show"
+        );
+}
+
+
+/* =====================================================
+   GÖNDER
+===================================================== */
+
+
 async function sendMessage() {
 
+
     if (busy) {
+
         return;
     }
 
@@ -977,28 +1640,47 @@ async function sendMessage() {
         input.value.trim();
 
 
-    if (!message) {
+    if (
+        !message
+        && !selectedFile
+    ) {
+
         return;
     }
 
 
-    busy = true;
+    busy =
+        true;
 
-    sendButton.disabled = true;
 
-    voiceButton.disabled = true;
+    sendButton.disabled =
+        true;
+
+
+    imageButton.disabled =
+        true;
+
+
+    let previewUrl =
+        null;
+
+
+    if (selectedFile) {
+
+
+        previewUrl =
+            URL.createObjectURL(
+                selectedFile
+            );
+    }
 
 
     addMessage(
         "user",
-        message
+        message ||
+        "Bu fotoğrafı incele.",
+        previewUrl
     );
-
-
-    input.value = "";
-
-    input.style.height =
-        "42px";
 
 
     showTyping();
@@ -1006,24 +1688,69 @@ async function sendMessage() {
 
     try {
 
-        const response =
-            await fetch(
-                "/chat",
-                {
-                    method: "POST",
 
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
+        let response;
 
-                    body:
-                        JSON.stringify({
-                            message:
-                                message
-                        })
-                }
+
+        if (selectedFile) {
+
+
+            const form =
+                new FormData();
+
+
+            form.append(
+                "message",
+                message ||
+                "Bu fotoğrafı incele."
             );
+
+
+            form.append(
+                "image",
+                selectedFile
+            );
+
+
+            response =
+                await fetch(
+                    "/chat-image",
+                    {
+                        method:
+                            "POST",
+
+                        body:
+                            form
+                    }
+                );
+
+
+        } else {
+
+
+            response =
+                await fetch(
+                    "/chat",
+                    {
+                        method:
+                            "POST",
+
+                        headers: {
+
+                            "Content-Type":
+                                "application/json"
+                        },
+
+                        body:
+                            JSON.stringify(
+                                {
+                                    message:
+                                        message
+                                }
+                            )
+                    }
+                );
+        }
 
 
         const data =
@@ -1036,11 +1763,24 @@ async function sendMessage() {
         addMessage(
             "assistant",
             data.reply ||
-            "NOVA şu anda cevap veremedi."
+            data.error ||
+            "NOVA cevap veremedi."
         );
 
 
+        input.value =
+            "";
+
+
+        input.style.height =
+            "44px";
+
+
+        removeImage();
+
+
     } catch (error) {
+
 
         hideTyping();
 
@@ -1058,32 +1798,117 @@ async function sendMessage() {
 
     } finally {
 
-        busy = false;
 
-        sendButton.disabled = false;
+        busy =
+            false;
 
-        voiceButton.disabled = false;
+
+        sendButton.disabled =
+            false;
+
+
+        imageButton.disabled =
+            false;
+
 
         input.focus();
-    }
 
+
+        if (previewUrl) {
+
+
+            setTimeout(
+                function () {
+
+
+                    URL.revokeObjectURL(
+                        previewUrl
+                    );
+
+
+                },
+                5000
+            );
+        }
+    }
 }
+
+
+/* =====================================================
+   BUTON + ENTER
+===================================================== */
+
+
+sendButton.onclick =
+    sendMessage;
+
+
+input.addEventListener(
+    "keydown",
+    function (event) {
+
+
+        if (
+            event.key === "Enter"
+            &&
+            !event.shiftKey
+        ) {
+
+
+            event.preventDefault();
+
+
+            sendMessage();
+        }
+    }
+);
+
+
+input.addEventListener(
+    "input",
+    function () {
+
+
+        this.style.height =
+            "44px";
+
+
+        this.style.height =
+            Math.min(
+                this.scrollHeight,
+                140
+            )
+            + "px";
+    }
+);
+
+
+/* =====================================================
+   YENİ SOHBET
+===================================================== */
 
 
 async function clearChat() {
 
+
     try {
+
 
         await fetch(
             "/clear",
             {
-                method: "POST"
+                method:
+                    "POST"
             }
         );
 
+
     } catch (error) {
 
-        console.error(error);
+
+        console.error(
+            error
+        );
     }
 
 
@@ -1092,18 +1917,28 @@ async function clearChat() {
             id="welcome"
             class="welcome"
         >
-            <h1>NOVA AI</h1>
+            <h1>
+                NOVA AI
+            </h1>
+
             <p>
-                Bugün sana nasıl yardımcı olabilirim?
+                Mesaj yaz veya fotoğraf yükle.
             </p>
         </div>
     `;
 }
 
 
+/* =====================================================
+   GEÇMİŞ
+===================================================== */
+
+
 async function loadHistory() {
 
+
     try {
+
 
         const response =
             await fetch(
@@ -1121,10 +1956,12 @@ async function loadHistory() {
             )
         ) {
 
+
             for (
                 const item
                 of data.history
             ) {
+
 
                 addMessage(
                     item.role,
@@ -1133,141 +1970,36 @@ async function loadHistory() {
             }
         }
 
+
     } catch (error) {
 
+
         console.error(
-            "Geçmiş yüklenemedi:",
             error
         );
     }
-
-}
-
-
-input.addEventListener(
-    "input",
-    function () {
-
-        this.style.height =
-            "42px";
-
-        this.style.height =
-            Math.min(
-                this.scrollHeight,
-                150
-            ) + "px";
-    }
-);
-
-
-input.addEventListener(
-    "keydown",
-    function (event) {
-
-        if (
-            event.key === "Enter"
-            &&
-            !event.shiftKey
-        ) {
-
-            event.preventDefault();
-
-            sendMessage();
-        }
-    }
-);
-
-
-function startVoice() {
-
-    const SpeechRecognition =
-        window.SpeechRecognition ||
-        window.webkitSpeechRecognition;
-
-
-    if (!SpeechRecognition) {
-
-        alert(
-            "Bu tarayıcı sesli mesaj özelliğini desteklemiyor."
-        );
-
-        return;
-    }
-
-
-    const recognition =
-        new SpeechRecognition();
-
-
-    recognition.lang =
-        "tr-TR";
-
-    recognition.interimResults =
-        false;
-
-    recognition.maxAlternatives =
-        1;
-
-
-    voiceButton.textContent =
-        "🔴";
-
-
-    recognition.onresult =
-        function (event) {
-
-            const transcript =
-                event.results[0][0]
-                    .transcript;
-
-
-            input.value =
-                transcript;
-
-
-            input.dispatchEvent(
-                new Event("input")
-            );
-        };
-
-
-    recognition.onerror =
-        function (event) {
-
-            console.error(
-                "Ses tanıma hatası:",
-                event.error
-            );
-        };
-
-
-    recognition.onend =
-        function () {
-
-            voiceButton.textContent =
-                "🎤";
-        };
-
-
-    recognition.start();
 }
 
 
 loadHistory();
 
+
 </script>
 
+
 </body>
+
 </html>
 """
 
 
 # =========================================================
-# ROUTES
+# ANA SAYFA
 # =========================================================
 
 @app.route("/")
 def home():
+
     get_user_id()
 
     return render_template_string(
@@ -1275,8 +2007,16 @@ def home():
     )
 
 
-@app.route("/chat", methods=["POST"])
+# =========================================================
+# NORMAL MESAJ
+# =========================================================
+
+@app.route(
+    "/chat",
+    methods=["POST"]
+)
 def chat_route():
+
     user_id = get_user_id()
 
     user_history = get_user_history(
@@ -1287,11 +2027,9 @@ def chat_route():
         user_id
     )
 
-
     data = request.get_json(
         silent=True
     ) or {}
-
 
     message = str(
         data.get(
@@ -1300,28 +2038,30 @@ def chat_route():
         )
     ).strip()
 
-
     if not message:
 
         return jsonify({
-            "reply":
-                "Bir mesaj yazmalısın."
+            "error":
+                "Mesaj boş olamaz."
         }), 400
-
 
     update_memory(
         message,
-        user_id,
         user_memory
     )
 
-
-    reply = ask_gemini(
+    reply, error = ask_text(
         message,
         user_history,
         user_memory
     )
 
+    if error:
+
+        return jsonify({
+            "error":
+                error
+        }), 503
 
     user_history.append({
         "role":
@@ -1334,6 +2074,139 @@ def chat_route():
             datetime.now().isoformat()
     })
 
+    user_history.append({
+        "role":
+            "assistant",
+
+        "text":
+            reply,
+
+        "time":
+            datetime.now().isoformat()
+    })
+
+    user_histories[user_id] = (
+        user_history[-200:]
+    )
+
+    return jsonify({
+        "reply":
+            reply
+    })
+
+
+# =========================================================
+# FOTOĞRAF MESAJI
+# =========================================================
+
+@app.route(
+    "/chat-image",
+    methods=["POST"]
+)
+def chat_image_route():
+
+    user_id = get_user_id()
+
+    user_history = get_user_history(
+        user_id
+    )
+
+    user_memory = get_user_memory(
+        user_id
+    )
+
+    message = str(
+        request.form.get(
+            "message",
+            ""
+        )
+    ).strip()
+
+    uploaded = request.files.get(
+        "image"
+    )
+
+    if (
+        uploaded is None
+        or not uploaded.filename
+    ):
+
+        return jsonify({
+            "error":
+                "Fotoğraf bulunamadı."
+        }), 400
+
+    allowed_types = {
+        "image/jpeg",
+        "image/png",
+        "image/webp"
+    }
+
+    mime_type = (
+        uploaded.mimetype
+    )
+
+    if (
+        mime_type
+        not in allowed_types
+    ):
+
+        return jsonify({
+            "error":
+                "Sadece JPG, PNG veya WEBP yükleyebilirsin."
+        }), 400
+
+    image_bytes = uploaded.read()
+
+    if not image_bytes:
+
+        return jsonify({
+            "error":
+                "Fotoğraf boş."
+        }), 400
+
+    if (
+        len(image_bytes)
+        >
+        8 * 1024 * 1024
+    ):
+
+        return jsonify({
+            "error":
+                "Fotoğraf en fazla 8 MB olabilir."
+        }), 400
+
+    prompt = (
+        message
+        or
+        "Bu fotoğrafı incele ve bana ne gördüğünü anlat."
+    )
+
+    reply, error = ask_image(
+        prompt,
+        image_bytes,
+        mime_type,
+        user_memory
+    )
+
+    if error:
+
+        return jsonify({
+            "error":
+                error
+        }), 503
+
+    user_history.append({
+        "role":
+            "user",
+
+        "text":
+            "🖼️ Fotoğraf: "
+            + prompt,
+
+        "time":
+            datetime.now().isoformat()
+    })
 
     user_history.append({
         "role":
@@ -1346,18 +2219,9 @@ def chat_route():
             datetime.now().isoformat()
     })
 
-
-    user_history = user_history[-200:]
-
-    user_histories[user_id] =
-        user_history
-
-
-    save_json(
-        HISTORY_FILE,
-        user_histories
+    user_histories[user_id] = (
+        user_history[-200:]
     )
-
 
     return jsonify({
         "reply":
@@ -1365,32 +2229,38 @@ def chat_route():
     })
 
 
+# =========================================================
+# GEÇMİŞ
+# =========================================================
+
 @app.route("/history")
 def history_route():
+
     user_id = get_user_id()
 
-    user_history = get_user_history(
+    history = get_user_history(
         user_id
     )
 
-
     return jsonify({
         "history":
-            user_history[-100:]
+            history[-100:]
     })
 
 
-@app.route("/clear", methods=["POST"])
+# =========================================================
+# YENİ SOHBET
+# =========================================================
+
+@app.route(
+    "/clear",
+    methods=["POST"]
+)
 def clear_route():
+
     user_id = get_user_id()
 
     user_histories[user_id] = []
-
-    save_json(
-        HISTORY_FILE,
-        user_histories
-    )
-
 
     return jsonify({
         "ok":
@@ -1405,20 +2275,30 @@ def clear_route():
 if __name__ == "__main__":
 
     print()
-    print("========================================")
-    print("           NOVA AI BAŞLATILIYOR")
-    print("========================================")
+    print(
+        "========================================"
+    )
+    print(
+        "          NOVA AI BAŞLATILIYOR"
+    )
+    print(
+        "========================================"
+    )
     print()
-
-    print("Gemini: AKTİF")
-    print("Kullanıcı izolasyonu: AKTİF")
-    print("Kişisel sohbet geçmişi: AKTİF")
-    print("Kişisel hafıza: AKTİF")
-
+    print(
+        "Kişisel sohbet: AKTİF"
+    )
+    print(
+        "Fotoğraf yükleme: AKTİF"
+    )
+    print(
+        "Fotoğraf analizi: AKTİF"
+    )
     print()
-    print("http://127.0.0.1:5000")
+    print(
+        "http://127.0.0.1:5000"
+    )
     print()
-
 
     app.run(
         host="0.0.0.0",
