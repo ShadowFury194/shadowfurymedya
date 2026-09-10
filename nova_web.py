@@ -1,9 +1,10 @@
 import os
 import json
 import re
+import uuid
 from datetime import datetime
 
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template_string, session
 from google import genai
 from google.genai import types
 
@@ -14,6 +15,16 @@ from google.genai import types
 # =========================================================
 
 app = Flask(__name__)
+
+# Her ziyaretçiye özel imzalı oturum çerezi.
+# Render'da NOVA_SECRET_KEY adında sabit bir ortam değişkeni tanımlaman önerilir.
+app.secret_key = os.getenv("NOVA_SECRET_KEY") or os.urandom(32)
+
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.getenv("RENDER") == "true",
+)
 
 API_KEY = os.getenv("GEMINI_API_KEY")
 
@@ -59,8 +70,50 @@ def save_json(filename, data):
         print(f"{filename} kaydedilemedi:", error)
 
 
-memory = load_json(MEMORY_FILE, {})
-history = load_json(HISTORY_FILE, [])
+loaded_memory = load_json(MEMORY_FILE, {})
+loaded_history = load_json(HISTORY_FILE, {})
+
+# Eski ortak sohbet geçmişini yeni kullanıcılara göstermiyoruz.
+if not isinstance(loaded_memory, dict):
+    loaded_memory = {}
+
+if isinstance(loaded_history, list):
+    loaded_history = {}
+elif not isinstance(loaded_history, dict):
+    loaded_history = {}
+
+user_memories = loaded_memory
+user_histories = loaded_history
+
+
+def get_user_id():
+    user_id = session.get("nova_user_id")
+
+    if not user_id:
+        user_id = uuid.uuid4().hex
+        session["nova_user_id"] = user_id
+
+    return user_id
+
+
+def get_user_memory(user_id):
+    user_memory = user_memories.get(user_id)
+
+    if not isinstance(user_memory, dict):
+        user_memory = {}
+        user_memories[user_id] = user_memory
+
+    return user_memory
+
+
+def get_user_history(user_id):
+    user_history = user_histories.get(user_id)
+
+    if not isinstance(user_history, list):
+        user_history = []
+        user_histories[user_id] = user_history
+
+    return user_history
 
 
 # =========================================================
@@ -99,7 +152,7 @@ Seni kimin yaptığı veya kurduğu sorulursa:
 # HAFIZA
 # =========================================================
 
-def update_memory(message):
+def update_memory(message, user_id, user_memory):
     text = message.strip()
 
     patterns = [
@@ -118,8 +171,9 @@ def update_memory(message):
         if match:
             name = match.group(1).strip().capitalize()
 
-            memory["kullanıcı_adı"] = name
-            save_json(MEMORY_FILE, memory)
+            user_memory["kullanıcı_adı"] = name
+            user_memories[user_id] = user_memory
+            save_json(MEMORY_FILE, user_memories)
 
             print("Hafızaya kaydedildi:", name)
             break
@@ -129,7 +183,7 @@ def update_memory(message):
 # GEMINI
 # =========================================================
 
-def ask_gemini(message):
+def ask_gemini(message, user_history, user_memory):
     lower = message.lower().strip()
 
     identity_words = [
@@ -162,7 +216,7 @@ def ask_gemini(message):
         contents = []
 
         # Son konuşmaları Gemini'ye aktar
-        recent_history = history[-20:]
+        recent_history = user_history[-20:]
 
         for item in recent_history:
             role = item.get("role", "")
@@ -203,10 +257,10 @@ def ask_gemini(message):
 
         system_text = SYSTEM_PROMPT
 
-        if memory:
+        if user_memory:
             system_text += "\nKullanıcı hakkında hafızadaki bilgiler:\n"
 
-            for key, value in memory.items():
+            for key, value in user_memory.items():
                 system_text += f"- {key}: {value}\n"
 
         response = client.models.generate_content(
@@ -1224,7 +1278,9 @@ def home():
 
 @app.route("/chat", methods=["POST"])
 def chat_route():
-    global history
+    user_id = get_user_id()
+    user_history = get_user_history(user_id)
+    user_memory = get_user_memory(user_id)
 
     data = request.get_json(
         silent=True
@@ -1243,30 +1299,38 @@ def chat_route():
                 "Bir mesaj yazmalısın."
         })
 
-    update_memory(message)
+    update_memory(
+        message,
+        user_id,
+        user_memory
+    )
 
-    reply = ask_gemini(message)
+    reply = ask_gemini(
+        message,
+        user_history,
+        user_memory
+    )
 
-    history.append({
+    user_history.append({
         "role": "user",
         "text": message,
         "time":
             datetime.now().isoformat()
     })
 
-    history.append({
+    user_history.append({
         "role": "assistant",
         "text": reply,
         "time":
             datetime.now().isoformat()
     })
 
-    # geçmiş çok büyümesin
-    history = history[-200:]
+    user_history = user_history[-200:]
+    user_histories[user_id] = user_history
 
     save_json(
         HISTORY_FILE,
-        history
+        user_histories
     )
 
     return jsonify({
@@ -1276,8 +1340,11 @@ def chat_route():
 
 @app.route("/history")
 def history_route():
+    user_id = get_user_id()
+    user_history = get_user_history(user_id)
+
     return jsonify({
-        "history": history[-100:]
+        "history": user_history[-100:]
     })
 
 
@@ -1286,13 +1353,13 @@ def history_route():
     methods=["POST"]
 )
 def clear_route():
-    global history
+    user_id = get_user_id()
 
-    history = []
+    user_histories[user_id] = []
 
     save_json(
         HISTORY_FILE,
-        history
+        user_histories
     )
 
     return jsonify({
